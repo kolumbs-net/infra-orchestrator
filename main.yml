@@ -50,6 +50,7 @@
         access_token: "{{ github_runner_registration_token }}"
         runner_org: true
         runner_group: "Default"
+        hide_sensitive_logs: false
         runner_user: "{{ ansible_user }}"
         runner_name: "pi-server-1"
         runner_labels:
