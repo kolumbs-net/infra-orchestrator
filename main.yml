@@ -51,9 +51,10 @@
         runner_org: true
         runner_group: "Default"
         hide_sensitive_logs: false
+        github_actions_architecture: "arm"
         runner_user: "{{ ansible_user }}"
         runner_name: "pi-server-1"
         runner_labels:
           - self-hosted
           - Linux
-          - ARM64
+          - ARM
