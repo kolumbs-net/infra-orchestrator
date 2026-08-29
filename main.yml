@@ -49,6 +49,7 @@
       vars:
         access_token: "{{ github_runner_registration_token }}"
         runner_org: true
+        runner_group: "Default"
         runner_user: "{{ ansible_user }}"
         runner_name: "pi-server-1"
         runner_labels:
