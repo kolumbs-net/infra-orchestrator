@@ -44,6 +44,31 @@
 - name: Provision GitHub Actions Runner (Pi)
   hosts: pi-server-1
   become: true
+  pre_tasks:
+    - name: Detect userland architecture
+      ansible.builtin.command: dpkg --print-architecture
+      register: dpkg_arch
+      changed_when: false
+      check_mode: false
+
+    - name: Ensure the userland architecture has a GitHub Actions runner build
+      ansible.builtin.assert:
+        that:
+          - (dpkg_arch.stdout | trim) in github_actions_architecture_by_dpkg
+        fail_msg: >-
+          No GitHub Actions runner build mapped for dpkg architecture
+          '{{ dpkg_arch.stdout | trim }}'. Known: {{ github_actions_architecture_by_dpkg.keys() | list | join(', ') }}.
+      vars:
+        github_actions_architecture_by_dpkg: &arch_map
+          armhf: arm
+          arm64: arm64
+          amd64: x64
+
+    - name: Map Debian architecture to GitHub Actions runner architecture
+      ansible.builtin.set_fact:
+        runner_arch: "{{ github_actions_architecture_by_dpkg[dpkg_arch.stdout | trim] }}"
+      vars:
+        github_actions_architecture_by_dpkg: *arch_map
   roles:
     - role: monolithprojects.github_actions_runner
       vars:
@@ -51,10 +76,8 @@
         runner_org: true
         runner_group: "Default"
         hide_sensitive_logs: false
-        github_actions_architecture: "arm"
+        github_actions_architecture: "{{ runner_arch }}"
         runner_user: "{{ ansible_user }}"
         runner_name: "pi-server-1"
         runner_labels:
-          - self-hosted
-          - Linux
-          - ARM
+          - pi-server-1
