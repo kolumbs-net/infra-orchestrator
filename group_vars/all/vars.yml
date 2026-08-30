@@ -9,6 +9,7 @@ ansible_port: "{{ vault_ssh_port }}"
 ansible_python_interpreter: /usr/bin/python3
 
 github_runner_registration_token: "{{ vault_github_runner_registration_token }}"
+github_runner_user: "{{ vault_github_runner_user }}"
 github_account: "kolumbs-net"
 
 system_timezone: "Europe/Riga"

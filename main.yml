@@ -69,6 +69,14 @@
         runner_arch: "{{ github_actions_architecture_by_dpkg[dpkg_arch.stdout | trim] }}"
       vars:
         github_actions_architecture_by_dpkg: *arch_map
+
+    - name: Ensure the GitHub Actions runner user exists
+      ansible.builtin.user:
+        name: "{{ github_runner_user }}"
+        shell: /usr/sbin/nologin
+        create_home: true
+        password_lock: true
+        state: present
   roles:
     - role: monolithprojects.github_actions_runner
       vars:
@@ -77,7 +85,7 @@
         runner_group: "Default"
         hide_sensitive_logs: false
         github_actions_architecture: "{{ runner_arch }}"
-        runner_user: "{{ ansible_user }}"
+        runner_user: "{{ github_runner_user }}"
         runner_name: "pi-server-1"
         runner_labels:
           - pi-server-1
