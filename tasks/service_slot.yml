@@ -6,27 +6,26 @@
 #   - the runner account owns /opt/<slot_name>; the pipeline puts a release
 #     there and points /opt/<slot_name>/current at it
 #   - the service runs /opt/<slot_name>/current/start as the <slot_name>
-#     account, with PORT and the slot's secrets in its environment
+#     account, with PORT in its environment
+#   - anything else the service needs - configuration, secrets - is its
+#     pipeline's business: it writes them under /opt/<slot_name>, where the
+#     setgid directory makes them readable to the service and nobody else
 #   - anything it keeps goes in $STATE_DIRECTORY (/var/lib/<slot_name>)
 #   - the runner may run exactly `systemctl restart <slot_name>`, nothing else
+#
+# Infra knows only what is infra's: the port it allocates and the route to it.
 #
 # Parameters:
 #   slot_name   service and account name
 #   slot_port   local port the service listens on (localhost only)
 #   slot_route  optional public path on the TLS vhost, proxied as a websocket
-#   slot_env    secrets for the service's environment, from the vault
 
 - name: "{{ slot_name }}: check the slot's parameters"
   ansible.builtin.assert:
     that:
       - slot_name is match('^[a-z][a-z0-9-]*$')
       - slot_port | int > 1024
-      - slot_env is mapping
-      - slot_env.values() | select('string') | select('match', '^[^"\\\\\n]+$') | list | length == slot_env | length
-    fail_msg: >-
-      {{ slot_name }}: needs a lowercase name, a port above 1024, and non-empty
-      secrets without quotes, backslashes or newlines.
-  no_log: true
+    fail_msg: "{{ slot_name }}: needs a lowercase name and a port above 1024."
 
 - name: "{{ slot_name }}: service account"
   ansible.builtin.user:
@@ -38,13 +37,15 @@
     password_lock: true
     state: present
 
+# Setgid to the service's group: everything the runner writes here is readable
+# by the service, and other accounts cannot enter at all.
 - name: "{{ slot_name }}: deploy directory, owned by the runner"
   ansible.builtin.file:
     path: "/opt/{{ slot_name }}"
     state: directory
     owner: "{{ github_runner_user }}"
-    group: "{{ github_runner_user }}"
-    mode: "0755"
+    group: "{{ slot_name }}"
+    mode: "2750"
 
 - name: "{{ slot_name }}: check whether the slot exists yet"
   ansible.builtin.stat:
@@ -66,26 +67,6 @@
     fail_msg: "{{ slot_name }}: its port is already in use."
   when: not slot_unit_file.stat.exists
 
-- name: "{{ slot_name }}: configuration directory"
-  ansible.builtin.file:
-    path: "/etc/{{ slot_name }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0750"
-
-# Read by systemd as root before it drops to the service account, so neither the
-# service account nor the runner can read it.
-- name: "{{ slot_name }}: environment with secrets"
-  ansible.builtin.template:
-    src: service.env.j2
-    dest: "/etc/{{ slot_name }}/env"
-    owner: root
-    group: root
-    mode: "0600"
-  register: slot_env_file
-  no_log: true
-
 - name: "{{ slot_name }}: systemd unit"
   ansible.builtin.template:
     src: service.unit.j2
@@ -102,9 +83,9 @@
     enabled: true
     daemon_reload: "{{ slot_unit.changed }}"
 
-- name: "{{ slot_name }}: restart if its unit or secrets changed"
+- name: "{{ slot_name }}: restart if its unit changed"
   ansible.builtin.command: systemctl try-restart {{ slot_name }}
-  when: slot_unit.changed or slot_env_file.changed
+  when: slot_unit.changed
   changed_when: true
 
 - name: "{{ slot_name }}: let the runner restart it, and nothing else"

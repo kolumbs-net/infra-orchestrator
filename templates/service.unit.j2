@@ -10,7 +10,7 @@ ConditionPathExists=/opt/{{ slot_name }}/current/start
 [Service]
 User={{ slot_name }}
 Group={{ slot_name }}
-EnvironmentFile=/etc/{{ slot_name }}/env
+Environment=PORT={{ slot_port }}
 ExecStart=/opt/{{ slot_name }}/current/start
 Restart=on-failure
 RestartSec=5
