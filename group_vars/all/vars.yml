@@ -43,6 +43,7 @@ uv_url: "https://github.com/astral-sh/uv/releases/download/{{ uv_version }}/uv-{
 rustup_url: "https://static.rust-lang.org/rustup/archive/{{ rustup_version }}/{{ toolchain_target }}/rustup-init"
 
 # --- Service slots (see tasks/service_slot.yml) ---
-botforge_port: 1609
-botforge_route: /ws/personal
+# Port and route are internal details of the machine, so they live in the vault.
+botforge_port: "{{ vault_botforge_port }}"
+botforge_route: "{{ vault_botforge_route }}"
 botforge_admin_password: "{{ vault_botforge_admin_password }}"

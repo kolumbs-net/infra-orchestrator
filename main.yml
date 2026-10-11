@@ -136,12 +136,16 @@
   hosts: pi-server-1
   become: true
   tasks:
-    - name: Ensure the botforge admin password is in the vault
+    - name: Ensure botforge's settings are in the vault
       ansible.builtin.assert:
         that:
+          - vault_botforge_port is defined
+          - vault_botforge_route is defined
           - vault_botforge_admin_password is defined
           - (vault_botforge_admin_password | string | length) > 0
-        fail_msg: "Add vault_botforge_admin_password with: ansible-vault edit group_vars/all/vault.yml"
+        fail_msg: >-
+          Add vault_botforge_port, vault_botforge_route and
+          vault_botforge_admin_password with: ansible-vault edit group_vars/all/vault.yml
       no_log: true
 
     - name: Botforge slot

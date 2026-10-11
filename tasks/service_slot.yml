@@ -52,18 +52,18 @@
   register: slot_unit_file
 
 # Only on first provisioning - afterwards the service itself holds the port.
-- name: "{{ slot_name }}: read listeners on port {{ slot_port }}"
+- name: "{{ slot_name }}: read listeners on its port"
   ansible.builtin.command: ss -ltnH "sport = :{{ slot_port }}"
   register: slot_port_listeners
   changed_when: false
   check_mode: false
   when: not slot_unit_file.stat.exists
 
-- name: "{{ slot_name }}: ensure port {{ slot_port }} is free"
+- name: "{{ slot_name }}: ensure its port is free"
   ansible.builtin.assert:
     that:
       - slot_port_listeners.stdout | trim | length == 0
-    fail_msg: "Port {{ slot_port }} is already in use: {{ slot_port_listeners.stdout }}"
+    fail_msg: "{{ slot_name }}: its port is already in use."
   when: not slot_unit_file.stat.exists
 
 - name: "{{ slot_name }}: configuration directory"
@@ -116,7 +116,7 @@
     mode: "0440"
     validate: visudo -cf %s
 
-- name: "{{ slot_name }}: public route {{ slot_route | default('(none)') }}"
+- name: "{{ slot_name }}: public route"
   ansible.builtin.template:
     src: service.route.conf.j2
     dest: "{{ apache_routes_dir }}/{{ slot_name }}.conf"

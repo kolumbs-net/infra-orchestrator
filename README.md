@@ -226,13 +226,15 @@ On first provisioning, the playbook checks that the slot's port is free.
 
 ### Current slots
 
-| Service | Port | Route | Vault secrets |
-|---|---|---|---|
-| botforge | 1609 | `/ws/personal` | `vault_botforge_admin_password` |
+| Service | Vault entries |
+|---|---|
+| botforge | `vault_botforge_port`, `vault_botforge_route`, `vault_botforge_admin_password` |
+
+A slot's port and public route are internal details of the machine, so like the SSH port they live only in the vault.
 
 ### Adding a slot
 
-1. Add its port, route and secret bridges to `group_vars/all/vars.yml`, and the secrets to the vault (`ansible-vault edit group_vars/all/vault.yml`).
+1. Add its port, route and secrets to the vault (`ansible-vault edit group_vars/all/vault.yml`), and a bridge for each to `group_vars/all/vars.yml`.
 2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port`, an optional `slot_route` and `slot_env`.
 3. Run the playbook; then the service's pipeline can deploy it.
 
