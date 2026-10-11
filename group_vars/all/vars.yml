@@ -17,3 +17,32 @@ system_timezone: "Europe/Riga"
 apache_package_name: "apache2"
 apache_package_version: "2.4.67*" # allow distro-specific package suffixes while pinning major.minor.patch
 apache_service_name: "apache2"
+
+# --- Apache: Ansible-managed routes on the TLS vhost ---
+# The vhost itself (certificates, existing routes) is still hand-managed; it gets
+# one IncludeOptional line, and every route Ansible owns is a file in this directory.
+apache_tls_vhost: /etc/apache2/sites-enabled/kolumbs-ssl.conf
+apache_routes_dir: /etc/apache2/kolumbs.net.d
+
+# --- Build toolchain provided to deployment pipelines (see tasks/toolchain.yml) ---
+python_version: "3.11.2"   # the distribution's python3.11, matching piwheels
+uv_version: "0.13.0"
+rustup_version: "1.29.1"
+rust_version: "1.97.1"
+
+toolchain_manifest: /etc/kolumbs/toolchain.env
+toolchain_python: /usr/bin/python3.11
+toolchain_uv: /usr/local/bin/uv
+rust_rustup_home: /opt/rust/rustup
+rust_cargo_home: /opt/rust/cargo
+toolchain_target_by_dpkg:
+  armhf: armv7-unknown-linux-gnueabihf
+  arm64: aarch64-unknown-linux-gnu
+  amd64: x86_64-unknown-linux-gnu
+uv_url: "https://github.com/astral-sh/uv/releases/download/{{ uv_version }}/uv-{{ toolchain_target }}.tar.gz"
+rustup_url: "https://static.rust-lang.org/rustup/archive/{{ rustup_version }}/{{ toolchain_target }}/rustup-init"
+
+# --- Service slots (see tasks/service_slot.yml) ---
+botforge_port: 1609
+botforge_route: /ws/personal
+botforge_admin_password: "{{ vault_botforge_admin_password }}"

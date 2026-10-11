@@ -1,0 +1,3 @@
+# Managed by infra-orchestrator: the runner may restart {{ slot_name }} after a
+# deploy, and run nothing else as root.
+{{ github_runner_user }} ALL=(root) NOPASSWD: /usr/bin/systemctl restart {{ slot_name }}

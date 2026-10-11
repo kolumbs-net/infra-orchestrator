@@ -1,0 +1,158 @@
+---
+# Build toolchain every host provides to deployment pipelines.
+# Pipelines read the manifest written at the end and never install toolchains of
+# their own, so one version of each runs across all services on a host.
+
+- name: Detect userland architecture
+  tags: [always]
+  ansible.builtin.command: dpkg --print-architecture
+  register: toolchain_dpkg_arch
+  changed_when: false
+  check_mode: false
+
+- name: Ensure the userland architecture has a known target
+  tags: [always]
+  ansible.builtin.assert:
+    that:
+      - (toolchain_dpkg_arch.stdout | trim) in toolchain_target_by_dpkg
+    fail_msg: >-
+      No toolchain target mapped for dpkg architecture
+      '{{ toolchain_dpkg_arch.stdout | trim }}'. Known: {{ toolchain_target_by_dpkg.keys() | list | join(', ') }}.
+
+# Set from the userland rather than detected by each installer: a 32-bit
+# userland often runs on a 64-bit kernel, and installers that look at the kernel
+# would pick the wrong target.
+- name: Map Debian architecture to the toolchain target
+  tags: [always]
+  ansible.builtin.set_fact:
+    toolchain_target: "{{ toolchain_target_by_dpkg[toolchain_dpkg_arch.stdout | trim] }}"
+
+# --- Python: the distribution's own, which is what piwheels builds against ---
+
+- name: Install Python using version constraint
+  tags: [python]
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    name:
+      - "python3.11={{ python_version }}*"
+      - "python3.11-venv={{ python_version }}*"
+    state: present
+
+- name: Read the installed Python version
+  tags: [python]
+  ansible.builtin.command: "{{ toolchain_python }} --version"
+  register: toolchain_python_version
+  changed_when: false
+  check_mode: false
+
+- name: Ensure the installed Python is the pinned version
+  tags: [python]
+  ansible.builtin.assert:
+    that:
+      - toolchain_python_version.stdout is match('Python ' ~ (python_version | regex_escape) ~ '$')
+    fail_msg: "Expected Python {{ python_version }}, found '{{ toolchain_python_version.stdout }}'."
+
+# --- uv: installs a project's uv.lock ---
+
+- name: Read the installed uv version
+  tags: [uv]
+  ansible.builtin.command: "{{ toolchain_uv }} --version"
+  register: toolchain_uv_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install the pinned uv
+  tags: [uv]
+  when: toolchain_uv_installed.stdout is not match('uv ' ~ (uv_version | regex_escape) ~ '( |$)')
+  block:
+    - name: Download uv
+      ansible.builtin.get_url:
+        url: "{{ uv_url }}"
+        checksum: "sha256:{{ uv_url }}.sha256"
+        dest: "/tmp/uv-{{ uv_version }}.tar.gz"
+        mode: "0644"
+
+    - name: Unpack uv
+      ansible.builtin.unarchive:
+        src: "/tmp/uv-{{ uv_version }}.tar.gz"
+        dest: /tmp
+        remote_src: true
+
+    - name: Put uv and uvx on the system path
+      ansible.builtin.copy:
+        src: "/tmp/uv-{{ toolchain_target }}/{{ item }}"
+        dest: "{{ toolchain_uv | dirname }}/{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - uv
+        - uvx
+
+# --- Rust: installed with rustup, because the distribution's rustc is too old ---
+
+- name: Check whether rustup is installed
+  tags: [rust]
+  ansible.builtin.stat:
+    path: "{{ rust_cargo_home }}/bin/rustup"
+  register: toolchain_rustup
+
+- name: Install rustup
+  tags: [rust]
+  when: not toolchain_rustup.stat.exists
+  block:
+    - name: Download rustup-init
+      ansible.builtin.get_url:
+        url: "{{ rustup_url }}"
+        checksum: "sha256:{{ rustup_url }}.sha256"
+        dest: /tmp/rustup-init
+        mode: "0755"
+
+    - name: Run rustup-init
+      ansible.builtin.command: >-
+        /tmp/rustup-init -y --no-modify-path --profile minimal
+        --default-host {{ toolchain_target }}
+        --default-toolchain {{ rust_version }}
+      environment: &rust_env
+        RUSTUP_HOME: "{{ rust_rustup_home }}"
+        CARGO_HOME: "{{ rust_cargo_home }}"
+      changed_when: true
+
+- name: Read the default Rust version
+  tags: [rust]
+  ansible.builtin.command: "{{ rust_cargo_home }}/bin/rustc --version"
+  environment: *rust_env
+  register: toolchain_rustc_version
+  changed_when: false
+  check_mode: false
+
+- name: Make the pinned Rust the default
+  tags: [rust]
+  ansible.builtin.command: >-
+    {{ rust_cargo_home }}/bin/rustup default {{ rust_version }}
+  environment: *rust_env
+  when: toolchain_rustc_version.stdout is not match('rustc ' ~ (rust_version | regex_escape) ~ ' ')
+  changed_when: true
+
+# --- The manifest pipelines read ---
+
+- name: Ensure the manifest directory exists
+  tags: [manifest]
+  ansible.builtin.file:
+    path: "{{ toolchain_manifest | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the toolchain manifest
+  tags: [manifest]
+  ansible.builtin.template:
+    src: toolchain.env.j2
+    dest: "{{ toolchain_manifest }}"
+    owner: root
+    group: root
+    mode: "0644"

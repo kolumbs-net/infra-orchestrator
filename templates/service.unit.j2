@@ -1,0 +1,30 @@
+# Managed by infra-orchestrator. The service's own pipeline deploys what runs
+# here; this unit only says how it runs.
+[Unit]
+Description={{ slot_name }} (deployed by its pipeline)
+After=network-online.target
+Wants=network-online.target
+# Nothing to run until the first deploy has put a release in place.
+ConditionPathExists=/opt/{{ slot_name }}/current/start
+
+[Service]
+User={{ slot_name }}
+Group={{ slot_name }}
+EnvironmentFile=/etc/{{ slot_name }}/env
+ExecStart=/opt/{{ slot_name }}/current/start
+Restart=on-failure
+RestartSec=5
+
+# Writable: $STATE_DIRECTORY (/var/lib/{{ slot_name }}) and
+# $RUNTIME_DIRECTORY (/run/{{ slot_name }}). Everything else is read-only.
+StateDirectory={{ slot_name }}
+StateDirectoryMode=0750
+RuntimeDirectory={{ slot_name }}
+WorkingDirectory=/var/lib/{{ slot_name }}
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
