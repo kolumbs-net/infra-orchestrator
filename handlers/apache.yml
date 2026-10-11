@@ -1,0 +1,13 @@
+---
+# Check the configuration before reloading, so a bad route never takes the
+# running sites down.
+- name: Check Apache configuration
+  ansible.builtin.command: apache2ctl configtest
+  changed_when: false
+  listen: Reload Apache
+
+- name: Reload Apache service
+  ansible.builtin.service:
+    name: "{{ apache_service_name }}"
+    state: reloaded
+  listen: Reload Apache

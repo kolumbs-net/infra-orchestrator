@@ -41,6 +41,48 @@
         enabled: true
         state: started
 
+    - name: Ensure Apache proxy modules are enabled
+      ansible.builtin.command: a2enmod {{ item }}
+      args:
+        creates: "/etc/apache2/mods-enabled/{{ item }}.load"
+      loop:
+        - proxy
+        - proxy_http
+        - proxy_wstunnel
+      notify: Reload Apache
+
+    - name: Ensure the directory for Ansible-managed routes exists
+      ansible.builtin.file:
+        path: "{{ apache_routes_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Find the TLS vhost file behind sites-enabled
+      ansible.builtin.stat:
+        path: "{{ apache_tls_vhost }}"
+      register: apache_tls_vhost_file
+
+    - name: Ensure the TLS vhost includes the Ansible-managed routes
+      ansible.builtin.lineinfile:
+        path: "{{ apache_tls_vhost_file.stat.lnk_source | default(apache_tls_vhost) }}"
+        line: "        IncludeOptional {{ apache_routes_dir }}/*.conf"
+        insertbefore: '^\s*</VirtualHost>'
+        firstmatch: true
+      notify: Reload Apache
+
+  handlers:
+    - name: Apache handlers
+      ansible.builtin.import_tasks: handlers/apache.yml
+
+- name: Provide the build toolchain
+  hosts: servers
+  become: true
+  tasks:
+    - name: Toolchain
+      ansible.builtin.import_tasks: tasks/toolchain.yml
+
 - name: Provision GitHub Actions Runner (Pi)
   hosts: pi-server-1
   become: true
@@ -89,3 +131,32 @@
         runner_name: "pi-server-1"
         runner_labels:
           - pi-server-1
+
+- name: Provision service slots (pi-server-1)
+  hosts: pi-server-1
+  become: true
+  tasks:
+    - name: Ensure botforge's settings are in the vault
+      ansible.builtin.assert:
+        that:
+          - vault_botforge_port is defined
+          - vault_botforge_route is defined
+          - vault_botforge_admin_password is defined
+          - (vault_botforge_admin_password | string | length) > 0
+        fail_msg: >-
+          Add vault_botforge_port, vault_botforge_route and
+          vault_botforge_admin_password with: ansible-vault edit group_vars/all/vault.yml
+      no_log: true
+
+    - name: Botforge slot
+      ansible.builtin.include_tasks: tasks/service_slot.yml
+      vars:
+        slot_name: botforge
+        slot_port: "{{ botforge_port }}"
+        slot_route: "{{ botforge_route }}"
+        slot_env:
+          ADMIN_PASSWORD: "{{ botforge_admin_password }}"
+
+  handlers:
+    - name: Apache handlers
+      ansible.builtin.import_tasks: handlers/apache.yml
