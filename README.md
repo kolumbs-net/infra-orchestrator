@@ -205,7 +205,8 @@ A service slot is everything a service needs from the host so that its own pipel
 The contract between infra and a service's pipeline:
 
 - the runner account owns `/opt/<service>`; the pipeline puts a release there and points `/opt/<service>/current` at it
-- the service runs `/opt/<service>/current/start` as its own `<service>` account (no login), with `PORT` and the service's secrets in its environment
+- the service runs `/opt/<service>/current/start` as its own `<service>` account (no login), with `PORT` in its environment
+- anything else the service needs — configuration, secrets — is its pipeline's business, kept with the service's repository (e.g. GitHub Actions secrets); the pipeline writes it under `/opt/<service>`
 - anything it keeps goes in `$STATE_DIRECTORY` (`/var/lib/<service>`); everything else on the system is read-only to it
 - the runner may run exactly `sudo systemctl restart <service>`, and nothing else as root
 
@@ -214,9 +215,8 @@ What a slot provides:
 | | |
 |---|---|
 | `<service>` account | runs the service; no login, no sudo |
-| `/opt/<service>` | owned by the runner; releases go here |
-| `/etc/<service>/env` | `PORT` and secrets from the vault; root-only, read by systemd before it drops privileges, so neither the service nor the runner can read it |
-| `<service>.service` | systemd unit running `current/start`, `Restart=on-failure`, hardened with `ProtectSystem=strict`; enabled, and starts on the first deploy |
+| `/opt/<service>` | owned by the runner, group-owned by the service, setgid `2750`: releases and anything the pipeline writes are readable by the service, and nobody else can enter |
+| `<service>.service` | systemd unit running `current/start` with `PORT` set, `Restart=on-failure`, hardened with `ProtectSystem=strict`; enabled, and starts on the first deploy |
 | sudoers entry | `systemctl restart <service>` for the runner |
 | public route (optional) | a file in `/etc/apache2/kolumbs.net.d/`, proxying a path on the TLS vhost to the service as a websocket |
 
@@ -228,14 +228,14 @@ On first provisioning, the playbook checks that the slot's port is free.
 
 | Service | Vault entries |
 |---|---|
-| botforge | `vault_botforge_port`, `vault_botforge_route`, `vault_botforge_admin_password` |
+| botforge | `vault_botforge_port`, `vault_botforge_route` |
 
-A slot's port and public route are internal details of the machine, so like the SSH port they live only in the vault.
+A slot's port and public route are internal details of the machine, so like the SSH port they live only in the vault. Infra holds nothing else about a service: its configuration and secrets belong to its own repository.
 
 ### Adding a slot
 
-1. Add its port, route and secrets to the vault (`ansible-vault edit group_vars/all/vault.yml`), and a bridge for each to `group_vars/all/vars.yml`.
-2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port`, an optional `slot_route` and `slot_env`.
+1. Add its port and route to the vault (`ansible-vault edit group_vars/all/vault.yml`), and a bridge for each to `group_vars/all/vars.yml`.
+2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port` and an optional `slot_route`.
 3. Run the playbook; then the service's pipeline can deploy it.
 
 ---

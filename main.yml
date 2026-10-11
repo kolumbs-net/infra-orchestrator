@@ -136,16 +136,14 @@
   hosts: pi-server-1
   become: true
   tasks:
-    - name: Ensure botforge's settings are in the vault
+    - name: Ensure botforge's slot settings are in the vault
       ansible.builtin.assert:
         that:
           - vault_botforge_port is defined
           - vault_botforge_route is defined
-          - vault_botforge_admin_password is defined
-          - (vault_botforge_admin_password | string | length) > 0
         fail_msg: >-
-          Add vault_botforge_port, vault_botforge_route and
-          vault_botforge_admin_password with: ansible-vault edit group_vars/all/vault.yml
+          Add vault_botforge_port and vault_botforge_route with:
+          ansible-vault edit group_vars/all/vault.yml
       no_log: true
 
     - name: Botforge slot
@@ -154,8 +152,6 @@
         slot_name: botforge
         slot_port: "{{ botforge_port }}"
         slot_route: "{{ botforge_route }}"
-        slot_env:
-          ADMIN_PASSWORD: "{{ botforge_admin_password }}"
 
   handlers:
     - name: Apache handlers
