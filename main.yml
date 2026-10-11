@@ -112,6 +112,15 @@
       vars:
         github_actions_architecture_by_dpkg: *arch_map
 
+    - name: Ensure the pinned runner version can run on this architecture
+      ansible.builtin.assert:
+        that:
+          - runner_arch != 'arm' or github_runner_version is version(github_runner_last_armhf_version, '<=')
+        fail_msg: >-
+          Runner {{ github_runner_version }} cannot start on a 32-bit ARM userland: its
+          service wrapper needs Node 24, which has no armv7 build. The newest that runs
+          here is {{ github_runner_last_armhf_version }}.
+
     - name: Ensure the GitHub Actions runner user exists
       ansible.builtin.user:
         name: "{{ github_runner_user }}"
@@ -123,6 +132,9 @@
     - role: monolithprojects.github_actions_runner
       vars:
         access_token: "{{ github_runner_registration_token }}"
+        runner_version: "{{ github_runner_version }}"
+        # Without this the runner updates itself to the newest release, past the pin.
+        runner_extra_config_args: "--disableupdate"
         runner_org: true
         runner_group: "Default"
         hide_sensitive_logs: false

@@ -45,3 +45,25 @@ both variables go away.
 The older port-based vhosts (one TLS port per service) either get the same
 treatment or disappear as each service moves to a path on 443, which also
 avoids firewalls that block uncommon ports.
+
+## Move pi-server-1 to a 64-bit OS
+
+**Today:** the Pi runs a 32-bit userland (`armhf`). Node.js 24 has no 32-bit ARM
+build, and from runner 2.338.0 GitHub's runner needs Node 24 for its own service
+wrapper, so the runner is pinned to 2.337.0 with self-update disabled
+(`github_runner_version`). That only buys time: GitHub stops accepting runners
+that fall too far behind, and JavaScript actions such as `actions/checkout` are
+moving to Node 24 as well. Until then, workflows on this runner should use plain
+`run:` steps rather than JavaScript actions.
+
+**Better:** reinstall with 64-bit Raspberry Pi OS (`arm64`). The runner, Node 24
+and all actions work; every compiled Python package has prebuilt `aarch64` wheels
+on PyPI, so piwheels is no longer needed. The playbook already maps `arm64` for
+both the toolchain and the runner, so then remove the pin and
+`--disableupdate`.
+
+**Before that:** whatever runs on the Pi but is not in this repository has to be
+restorable — the hand-managed vhosts and certificates (see above) and the
+services that predate the service slots. New devices, such as the GSM Pi, should
+start on 64-bit.
+
