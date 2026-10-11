@@ -11,6 +11,11 @@ ansible_python_interpreter: /usr/bin/python3
 github_runner_registration_token: "{{ vault_github_runner_registration_token }}"
 github_runner_user: "{{ vault_github_runner_user }}"
 github_account: "kolumbs-net"
+# Pinned, and the runner may not update itself: from 2.338.0 the runner's own
+# service wrapper needs Node 24, which has no 32-bit ARM build, so on an armhf
+# userland it exits before it starts. See TODO.md (64-bit OS).
+github_runner_version: "2.337.0"
+github_runner_last_armhf_version: "2.337.0"
 
 system_timezone: "Europe/Riga"
 
