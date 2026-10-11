@@ -67,3 +67,25 @@ restorable — the hand-managed vhosts and certificates (see above) and the
 services that predate the service slots. New devices, such as the GSM Pi, should
 start on 64-bit.
 
+
+## Account pool for botforge workers
+
+botforge v1 gives every user a private assistant whose tools (arbitrary Python)
+run in a worker process of their own, as their own Linux account, so the
+operating system keeps users out of each other's files and processes. See
+"v1 multi-user" in botforge's TODO.md for the design.
+
+Accounts cannot be created at runtime without root, so infra provides a pool:
+
+- Accounts `botforge-u001` … `botforge-uNNN`, no login, all in a group
+  `botforge-workers`. The pool size is a variable; growing it means changing the
+  number and re-running the playbook.
+- A folder per account, `/var/lib/botforge/users/uNNN/`, owned by that account,
+  mode `0700`. The `botforge` router never needs to read inside it.
+- One sudoers rule, the only escalation the botforge service gets:
+  `botforge ALL=(%botforge-workers) NOPASSWD: /opt/botforge/current/worker`.
+- `NoNewPrivileges=false` for the botforge service unit, which currently blocks
+  every sudo call. Ideally this is a per-slot option, not a change for all slots.
+
+Generic enough to become a slot option ("this slot runs per-user workers"), so
+another multi-user service could reuse it.
