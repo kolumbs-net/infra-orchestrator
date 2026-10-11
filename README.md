@@ -12,6 +12,12 @@ infra-orchestrator/
 ├── inventory.ini            # Host groups (no IPs — resolved from vault)
 ├── requirements.yml         # Community roles
 ├── main.yml                 # Master playbook
+├── tasks/
+│   ├── toolchain.yml        # Build toolchain provided to pipelines
+│   └── service_slot.yml     # Everything one service needs from the host
+├── templates/               # Toolchain manifest, service unit, env, sudoers, route
+├── handlers/
+│   └── apache.yml           # Config test, then reload
 ├── group_vars/
 │   └── all/
 │       ├── vault.yml        # AES-256 encrypted secrets  ← MUST be encrypted
@@ -76,6 +82,20 @@ Add this line:
 ```
 <username> ALL=(ALL) NOPASSWD: ALL
 ```
+
+This is a full root grant. Provisioning installs packages, writes systemd units and creates users, so the automation account needs broad privileges — narrowing this list breaks plays in ways that surface as confusing sudo errors much later.
+
+Because it is a full grant, nothing that executes untrusted code may run as this user. GitHub Actions workflows in particular run as a separate, unprivileged account — see below.
+
+### 3b — The GitHub Actions runner account
+
+Do **not** create this account by hand. `main.yml` creates it via the `Ensure the GitHub Actions runner user exists` pre-task, with:
+
+- `/usr/sbin/nologin` shell and a locked password — no interactive login
+- no SSH key — unreachable from outside
+- no general sudo — the only entries in `/etc/sudoers.d/` are the ones each [service slot](#service-slots) creates, each allowing exactly `systemctl restart <service>`
+
+Its username comes from `vault_github_runner_user`. Workflow jobs execute as this account, so it should only ever own the specific deployment directory a project needs. If a deploy has to restart a service, add a sudoers entry naming that exact command — never a general grant.
 
 ### 4 — Verify access from your control machine
 
@@ -146,6 +166,75 @@ ansible-playbook main.yml --check --diff
 * `group_vars/all/vars.yml` contains only non-sensitive values and `{{ vault_* }}` references — it is safe to commit as-is.
 * No plain-text secrets, IPs, usernames, or ports appear anywhere in the repository.
 * **`vault_github_runner_registration_token`** is only needed when provisioning or reinstalling a runner — use a short-lived PAT (e.g. 1-day expiry, `repo` scope) and revoke it once provisioning is done.
+
+---
+
+## Build toolchain
+
+Infra owns the toolchain on every host. Pipelines build on the host that runs the service, using exactly what this repository installs, and never install toolchains of their own. One version of each serves every service on a host.
+
+| Toolchain | Source | Pinned in `vars.yml` |
+|---|---|---|
+| Python | the distribution's `python3.11` and `python3.11-venv` — what piwheels builds against | `python_version` |
+| uv | official release binary, checksum-verified | `uv_version` |
+| Rust | `rustup`, system-wide in `/opt/rust` — the distribution's `rustc` is too old for edition 2024 | `rustup_version`, `rust_version` |
+
+The toolchain is owned by root and read-only to everyone else; build caches live in the runner account's home.
+
+What a host provides is declared in `/etc/kolumbs/toolchain.env`, which pipelines source:
+
+```sh
+TARGET=armv7-unknown-linux-gnueabihf
+PYTHON=/usr/bin/python3.11
+UV=/usr/local/bin/uv
+UV_PYTHON_DOWNLOADS=never       # uv uses PYTHON, never downloads one
+RUSTUP_HOME=/opt/rust/rustup
+CARGO=/opt/rust/cargo/bin/cargo
+```
+
+The target comes from the userland architecture (`dpkg --print-architecture`), not the kernel — a 32-bit Raspberry Pi OS often runs on a 64-bit kernel.
+
+To change a version, change it in `vars.yml` and run the playbook; the sections are tagged, so `--tags rust` (or `python`, `uv`, `manifest`) runs one alone.
+
+---
+
+## Service slots
+
+A service slot is everything a service needs from the host so that its own pipeline can build and deploy it with no further infra changes. `tasks/service_slot.yml` creates one; `main.yml` includes it once per service.
+
+The contract between infra and a service's pipeline:
+
+- the runner account owns `/opt/<service>`; the pipeline puts a release there and points `/opt/<service>/current` at it
+- the service runs `/opt/<service>/current/start` as its own `<service>` account (no login), with `PORT` and the service's secrets in its environment
+- anything it keeps goes in `$STATE_DIRECTORY` (`/var/lib/<service>`); everything else on the system is read-only to it
+- the runner may run exactly `sudo systemctl restart <service>`, and nothing else as root
+
+What a slot provides:
+
+| | |
+|---|---|
+| `<service>` account | runs the service; no login, no sudo |
+| `/opt/<service>` | owned by the runner; releases go here |
+| `/etc/<service>/env` | `PORT` and secrets from the vault; root-only, read by systemd before it drops privileges, so neither the service nor the runner can read it |
+| `<service>.service` | systemd unit running `current/start`, `Restart=on-failure`, hardened with `ProtectSystem=strict`; enabled, and starts on the first deploy |
+| sudoers entry | `systemctl restart <service>` for the runner |
+| public route (optional) | a file in `/etc/apache2/kolumbs.net.d/`, proxying a path on the TLS vhost to the service as a websocket |
+
+The TLS vhost itself — certificates and the routes that predate this — is still managed by hand. The playbook adds one `IncludeOptional /etc/apache2/kolumbs.net.d/*.conf` line to it, and every route it owns is a file in that directory. Apache's configuration is tested before every reload.
+
+On first provisioning, the playbook checks that the slot's port is free.
+
+### Current slots
+
+| Service | Port | Route | Vault secrets |
+|---|---|---|---|
+| botforge | 1609 | `/ws/personal` | `vault_botforge_admin_password` |
+
+### Adding a slot
+
+1. Add its port, route and secret bridges to `group_vars/all/vars.yml`, and the secrets to the vault (`ansible-vault edit group_vars/all/vault.yml`).
+2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port`, an optional `slot_route` and `slot_env`.
+3. Run the playbook; then the service's pipeline can deploy it.
 
 ---
 
