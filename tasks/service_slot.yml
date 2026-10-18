@@ -16,16 +16,20 @@
 # Infra knows only what is infra's: the port it allocates and the route to it.
 #
 # Parameters:
-#   slot_name   service and account name
-#   slot_port   local port the service listens on (localhost only)
-#   slot_route  optional public path on the TLS vhost, proxied as a websocket
+#   slot_name      service and account name
+#   slot_port      port the service listens on: localhost only for TCP; a UDP
+#                  service may listen on the LAN, since the router never
+#                  forwards it
+#   slot_protocol  optional, tcp (default) or udp
+#   slot_route     optional public path on the TLS vhost, proxied as a websocket
 
 - name: "{{ slot_name }}: check the slot's parameters"
   ansible.builtin.assert:
     that:
       - slot_name is match('^[a-z][a-z0-9-]*$')
       - slot_port | int > 1024
-    fail_msg: "{{ slot_name }}: needs a lowercase name and a port above 1024."
+      - slot_protocol | default('tcp') in ['tcp', 'udp']
+    fail_msg: "{{ slot_name }}: needs a lowercase name, a port above 1024 and protocol tcp or udp."
 
 - name: "{{ slot_name }}: service account"
   ansible.builtin.user:
@@ -54,7 +58,7 @@
 
 # Only on first provisioning - afterwards the service itself holds the port.
 - name: "{{ slot_name }}: read listeners on its port"
-  ansible.builtin.command: ss -ltnH "sport = :{{ slot_port }}"
+  ansible.builtin.command: ss -l{{ 'u' if slot_protocol | default('tcp') == 'udp' else 't' }}nH "sport = :{{ slot_port }}"
   register: slot_port_listeners
   changed_when: false
   check_mode: false
