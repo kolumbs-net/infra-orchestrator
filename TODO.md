@@ -67,3 +67,75 @@ restorable — the hand-managed vhosts and certificates (see above) and the
 services that predate the service slots. New devices, such as the GSM Pi, should
 start on 64-bit.
 
+
+## Standard ports for service slots
+
+**Today:** a slot has exactly one port: `slot_port`, an optional
+`slot_protocol` (`tcp` or `udp`) and an optional `slot_route`, given to the
+service as `PORT`. That fit botforge, but services need more: the telemetry
+collector receives probe readings over UDP on the LAN and should also serve a
+public, read-only HTTP API on a TCP port of its own, behind an Apache route.
+Every future service will need some set of ports too.
+
+**Problems:**
+
+- One port per slot. Adding a second means a one-off parameter per case, with
+  names that only fit that one service.
+- The port-free check runs only when a slot is first created, so a port added
+  to an existing slot is never checked.
+- Routes always proxy as websockets (`ws://`), so a plain HTTP service can't
+  have one.
+- The machine's convention, one port range for internal (LAN-only) services
+  and another for public ones, lives only in people's heads. Nothing stops a
+  public port from being taken from the internal range, or the other way round.
+
+**Better:** every slot declares its ports in one list, `slot_ports`:
+
+| Field | Meaning |
+|---|---|
+| `name` | lowercase; the service gets it as `<NAME>_PORT` (`api` → `API_PORT`) |
+| `port` | the number, from the vault |
+| `protocol` | `tcp` or `udp` |
+| `exposure` | `internal` (LAN only) or `external` (public) |
+| `route` | optional, external TCP ports only: public path on the TLS vhost |
+| `route_scheme` | `ws` (default) or `http` |
+
+- The unit gets one `Environment=<NAME>_PORT=<port>` per entry; `PORT`,
+  `slot_port`, `slot_protocol` and `slot_route` go away.
+- The play checks each entry before changing anything: a valid and unique
+  name, a unique port, tcp or udp, and a `route` only on an external TCP port.
+  **The exposure must match the port's range.** The internal and external
+  ranges come from the vault (e.g. `vault_internal_port_range`,
+  `vault_external_port_range`), like every other detail of the machine, so the
+  convention is enforced without being written into the repository.
+- Each port is checked as free, with `ss -lt` or `ss -lu` for its protocol,
+  whenever the current unit doesn't already declare it. A port added to an
+  existing slot is then checked too; ports the running service holds are
+  skipped.
+- The route file stays one per slot (`<slot>.conf`), with one `ProxyPass` per
+  routed port: `ws://localhost:<port>/` for `ws`, and `http://localhost:<port>/`
+  plus `ProxyPassReverse` for `http`. `proxy_http` is already enabled.
+
+**Slots after the change:**
+
+- botforge: one port, `websocket` (tcp, external, its current route, `ws`).
+  Its route file renders the same line as today.
+- telemetry: `collector` (udp, internal, today's port) and `api` (tcp,
+  external, new, with an `http` route). New vault entries:
+  `vault_telemetry_api_port` and `vault_telemetry_route`, each with an assert
+  and a bridge in `group_vars/all/vars.yml`.
+
+**How, in this order:**
+
+1. botforge reads its port as `${WEBSOCKET_PORT:-$PORT}` (see botforge's
+   TODO), deployed first, so it keeps running through the switch.
+2. This change, plus the new vault entries and the port ranges. Check with a
+   deliberately wrong port (an internal port taken from the external range)
+   that the play fails at the checks, then `--check --diff`: botforge's unit
+   should change only `PORT` → `WEBSOCKET_PORT`, and its route file not at all.
+3. The telemetry collector reads `COLLECTOR_PORT` and `API_PORT` (see
+   telemetry's TODO). Between steps 2 and 3 it stops, because it still expects
+   `PORT`; a short gap in readings is acceptable there.
+4. Update the README: the slot contract (`<NAME>_PORT` per declared port), the
+   fields and the range check under "Adding a slot", and each slot's ports
+   with their exposure in the slot table.
