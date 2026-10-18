@@ -165,6 +165,22 @@
         slot_port: "{{ botforge_port }}"
         slot_route: "{{ botforge_route }}"
 
+    - name: Ensure telemetry's slot settings are in the vault
+      ansible.builtin.assert:
+        that:
+          - vault_telemetry_port is defined
+        fail_msg: >-
+          Add vault_telemetry_port with:
+          ansible-vault edit group_vars/all/vault.yml
+      no_log: true
+
+    - name: Telemetry slot
+      ansible.builtin.include_tasks: tasks/service_slot.yml
+      vars:
+        slot_name: telemetry
+        slot_port: "{{ telemetry_port }}"
+        slot_protocol: udp
+
   handlers:
     - name: Apache handlers
       ansible.builtin.import_tasks: handlers/apache.yml

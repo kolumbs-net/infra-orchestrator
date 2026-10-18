@@ -222,20 +222,21 @@ What a slot provides:
 
 The TLS vhost itself — certificates and the routes that predate this — is still managed by hand. The playbook adds one `IncludeOptional /etc/apache2/kolumbs.net.d/*.conf` line to it, and every route it owns is a file in that directory. Apache's configuration is tested before every reload.
 
-On first provisioning, the playbook checks that the slot's port is free.
+On first provisioning, the playbook checks that the slot's port is free, for the slot's protocol (TCP or UDP).
 
 ### Current slots
 
 | Service | Vault entries |
 |---|---|
 | botforge | `vault_botforge_port`, `vault_botforge_route` |
+| telemetry | `vault_telemetry_port` (UDP, LAN only, no route) |
 
 A slot's port and public route are internal details of the machine, so like the SSH port they live only in the vault. Infra holds nothing else about a service: its configuration and secrets belong to its own repository.
 
 ### Adding a slot
 
 1. Add its port and route to the vault (`ansible-vault edit group_vars/all/vault.yml`), and a bridge for each to `group_vars/all/vars.yml`.
-2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port` and an optional `slot_route`.
+2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port`, an optional `slot_route`, and `slot_protocol: udp` for a UDP service (the default is `tcp`). A TCP service listens on localhost only; a UDP service may listen on the LAN, since its port is never forwarded.
 3. Run the playbook; then the service's pipeline can deploy it.
 
 ---

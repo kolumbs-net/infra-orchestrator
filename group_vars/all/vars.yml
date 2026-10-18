@@ -51,3 +51,4 @@ rustup_url: "https://static.rust-lang.org/rustup/archive/{{ rustup_version }}/{{
 # Port and route are internal details of the machine, so they live in the vault.
 botforge_port: "{{ vault_botforge_port }}"
 botforge_route: "{{ vault_botforge_route }}"
+telemetry_port: "{{ vault_telemetry_port }}"
