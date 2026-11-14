@@ -58,3 +58,5 @@ service_slots:
   - name: telemetry
     ports:
       - { env: PORT, port: "{{ vault_telemetry_port }}", protocol: udp, exposure: internal }
+      - { env: TELEMETRY_API_PORT, port: "{{ vault_telemetry_api_port }}", protocol: tcp,
+          exposure: external, route: "{{ vault_telemetry_api_route }}", route_scheme: http }

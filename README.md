@@ -247,7 +247,7 @@ Before anything changes, the playbook checks every slot: each vault value it use
 | Service | Ports (`env` · protocol · exposure) | Vault entries |
 |---|---|---|
 | botforge | `PORT` · tcp · external, routed (`ws`) | `vault_botforge_port`, `vault_botforge_route` |
-| telemetry | `PORT` · udp · internal | `vault_telemetry_port` |
+| telemetry | `PORT` · udp · internal; `TELEMETRY_API_PORT` · tcp · external, routed (`http`) | `vault_telemetry_port`, `vault_telemetry_api_port`, `vault_telemetry_api_route` |
 
 A slot's ports and routes, like the port ranges and the SSH port, are internal details of the machine, so they live only in the vault. Infra holds nothing else about a service: its configuration and secrets belong to its own repository.
 
