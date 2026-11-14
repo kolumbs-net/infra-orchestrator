@@ -1,2 +1,9 @@
 # Managed by infra-orchestrator: public route for the {{ slot_name }} service slot.
-ProxyPass "{{ slot_route }}" "ws://localhost:{{ slot_port }}/"
+{% for p in slot_routes %}
+{% if p.route_scheme | default('ws') == 'http' %}
+ProxyPass "{{ p.route }}" "http://localhost:{{ p.port }}/"
+ProxyPassReverse "{{ p.route }}" "http://localhost:{{ p.port }}/"
+{% else %}
+ProxyPass "{{ p.route }}" "ws://localhost:{{ p.port }}/"
+{% endif %}
+{% endfor %}

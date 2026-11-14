@@ -1,0 +1,77 @@
+---
+# Checks every entry of service_slots before any slot is changed. Messages name
+# slots and variables, never port numbers or routes.
+
+- name: "Service slots: every vault value they use is defined"
+  block:
+    - name: "Service slots: resolve them"
+      ansible.builtin.assert:
+        that:
+          - service_slots | to_json | length > 0
+        quiet: true
+  rescue:
+    - name: "Service slots: name the missing vault values"
+      ansible.builtin.fail:
+        msg: >-
+          service_slots uses {{ missing | join(', ') if missing else 'something undefined' }};
+          add it with: ansible-vault edit group_vars/all/vault.yml
+      vars:
+        missing: "{{ ansible_failed_result.msg | regex_findall(\"'(vault_[A-Za-z0-9_]+)' is undefined\") | unique }}"
+
+- name: "Service slots: the port ranges are in the vault"
+  ansible.builtin.assert:
+    that:
+      - vault_internal_port_range is defined
+      - vault_external_port_range is defined
+      - vault_internal_port_range | length == 2
+      - vault_external_port_range | length == 2
+    fail_msg: >-
+      Add vault_internal_port_range and vault_external_port_range, each as
+      [first, last], with: ansible-vault edit group_vars/all/vault.yml
+    quiet: true
+
+- name: "Service slots: check each slot"
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name is match('^[a-z][a-z0-9-]*$')
+      - service_slots | map(attribute='name') | select('equalto', item.name) | list | length == 1
+      - item.ports | default([]) | type_debug == 'list'
+      - item.ports | default([]) | map(attribute='env', default='') | unique | list | length == item.ports | default([]) | length
+    fail_msg: >-
+      {{ item.name | default('a slot') }}: needs a unique lowercase name and a list of
+      ports, each with an env that is unique in the slot.
+    quiet: true
+  loop: "{{ service_slots }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+
+- name: "Service slots: check each port"
+  ansible.builtin.assert:
+    that:
+      - item.1.env is defined
+      - item.1.env is match('^[A-Z][A-Z0-9_]*$')
+      - item.1.port | string is match('^[0-9]+$')
+      - all_ports | select('equalto', item.1.port | int) | list | length == 1
+      - item.1.protocol | default('') in ['tcp', 'udp']
+      - item.1.exposure | default('') in ['internal', 'external']
+      - port_range[0] | int <= item.1.port | int <= port_range[1] | int
+      - item.1.route is not defined or (item.1.exposure == 'external' and item.1.protocol == 'tcp')
+      - item.1.route is not defined or item.1.route is match('^/')
+      - item.1.route is not defined or all_routes | select('equalto', item.1.route) | list | length == 1
+      - item.1.route_scheme is not defined or item.1.route is defined
+      - item.1.route_scheme | default('ws') in ['ws', 'http']
+    fail_msg: >-
+      {{ item.0.name }} {{ item.1.env | default('(no env)') }}: needs an env like
+      SOME_PORT, a port no other entry uses, protocol tcp or udp, exposure internal
+      or external with the port in that range, and a route (a unique path starting
+      with /, route_scheme ws or http) only on an external tcp port.
+    quiet: true
+  loop: "{{ service_slots | subelements('ports', skip_missing=true) }}"
+  loop_control:
+    label: "{{ item.0.name }} {{ item.1.env | default('?') }}"
+  vars:
+    all_entries: "{{ service_slots | map(attribute='ports', default=[]) | flatten(levels=1) }}"
+    all_ports: "{{ all_entries | map(attribute='port') | map('int') | list }}"
+    all_routes: "{{ all_entries | selectattr('route', 'defined') | map(attribute='route') | list }}"
+    port_range: "{{ lookup('vars', 'vault_' ~ item.1.exposure | default('internal') ~ '_port_range') }}"

@@ -10,7 +10,9 @@ ConditionPathExists=/opt/{{ slot_name }}/current/start
 [Service]
 User={{ slot_name }}
 Group={{ slot_name }}
-Environment=PORT={{ slot_port }}
+{% for p in slot_ports %}
+Environment={{ p.env }}={{ p.port }}
+{% endfor %}
 ExecStart=/opt/{{ slot_name }}/current/start
 Restart=on-failure
 RestartSec=5
