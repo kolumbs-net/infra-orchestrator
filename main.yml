@@ -148,38 +148,19 @@
   hosts: pi-server-1
   become: true
   tasks:
-    - name: Ensure botforge's slot settings are in the vault
-      ansible.builtin.assert:
-        that:
-          - vault_botforge_port is defined
-          - vault_botforge_route is defined
-        fail_msg: >-
-          Add vault_botforge_port and vault_botforge_route with:
-          ansible-vault edit group_vars/all/vault.yml
-      no_log: true
+    - name: Check the service slots
+      ansible.builtin.import_tasks: tasks/service_slots_check.yml
 
-    - name: Botforge slot
+    - name: Service slot
       ansible.builtin.include_tasks: tasks/service_slot.yml
+      loop: "{{ service_slots }}"
+      loop_control:
+        loop_var: slot
+        label: "{{ slot.name }}"
       vars:
-        slot_name: botforge
-        slot_port: "{{ botforge_port }}"
-        slot_route: "{{ botforge_route }}"
-
-    - name: Ensure telemetry's slot settings are in the vault
-      ansible.builtin.assert:
-        that:
-          - vault_telemetry_port is defined
-        fail_msg: >-
-          Add vault_telemetry_port with:
-          ansible-vault edit group_vars/all/vault.yml
-      no_log: true
-
-    - name: Telemetry slot
-      ansible.builtin.include_tasks: tasks/service_slot.yml
-      vars:
-        slot_name: telemetry
-        slot_port: "{{ telemetry_port }}"
-        slot_protocol: udp
+        slot_name: "{{ slot.name }}"
+        slot_ports: "{{ slot.ports | default([]) }}"
+        slot_routes: "{{ slot_ports | selectattr('route', 'defined') | list }}"
 
   handlers:
     - name: Apache handlers

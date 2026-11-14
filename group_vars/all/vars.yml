@@ -47,8 +47,14 @@ toolchain_target_by_dpkg:
 uv_url: "https://github.com/astral-sh/uv/releases/download/{{ uv_version }}/uv-{{ toolchain_target }}.tar.gz"
 rustup_url: "https://static.rust-lang.org/rustup/archive/{{ rustup_version }}/{{ toolchain_target }}/rustup-init"
 
-# --- Service slots (see tasks/service_slot.yml) ---
-# Port and route are internal details of the machine, so they live in the vault.
-botforge_port: "{{ vault_botforge_port }}"
-botforge_route: "{{ vault_botforge_route }}"
-telemetry_port: "{{ vault_telemetry_port }}"
+# --- Service slots (see tasks/service_slot.yml and the README) ---
+# Ports and routes are internal details of the machine, so they live in the vault,
+# as do the port ranges each exposure must fall in.
+service_slots:
+  - name: botforge
+    ports:
+      - { env: PORT, port: "{{ vault_botforge_port }}", protocol: tcp,
+          exposure: external, route: "{{ vault_botforge_route }}", route_scheme: ws }
+  - name: telemetry
+    ports:
+      - { env: PORT, port: "{{ vault_telemetry_port }}", protocol: udp, exposure: internal }

@@ -14,6 +14,7 @@ infra-orchestrator/
 ├── main.yml                 # Master playbook
 ├── tasks/
 │   ├── toolchain.yml        # Build toolchain provided to pipelines
+│   ├── service_slots_check.yml  # Checks every slot before any is changed
 │   └── service_slot.yml     # Everything one service needs from the host
 ├── templates/               # Toolchain manifest, service unit, env, sudoers, route
 ├── handlers/
@@ -200,12 +201,12 @@ To change a version, change it in `vars.yml` and run the playbook; the sections 
 
 ## Service slots
 
-A service slot is everything a service needs from the host so that its own pipeline can build and deploy it with no further infra changes. `tasks/service_slot.yml` creates one; `main.yml` includes it once per service.
+A service slot is everything a service needs from the host so that its own pipeline can build and deploy it with no further infra changes. Every slot is one entry in `service_slots` (`group_vars/all/vars.yml`); `main.yml` checks them all, then runs `tasks/service_slot.yml` for each.
 
 The contract between infra and a service's pipeline:
 
 - the runner account owns `/opt/<service>`; the pipeline puts a release there and points `/opt/<service>/current` at it
-- the service runs `/opt/<service>/current/start` as its own `<service>` account (no login), with `PORT` in its environment
+- the service runs `/opt/<service>/current/start` as its own `<service>` account (no login), with each of its ports in the environment variable its slot names for it
 - anything else the service needs — configuration, secrets — is its pipeline's business, kept with the service's repository (e.g. GitHub Actions secrets); the pipeline writes it under `/opt/<service>`
 - anything it keeps goes in `$STATE_DIRECTORY` (`/var/lib/<service>`); everything else on the system is read-only to it
 - the runner may run exactly `sudo systemctl restart <service>`, and nothing else as root
@@ -216,28 +217,47 @@ What a slot provides:
 |---|---|
 | `<service>` account | runs the service; no login, no sudo |
 | `/opt/<service>` | owned by the runner, group-owned by the service, setgid `2750`: releases and anything the pipeline writes are readable by the service, and nobody else can enter |
-| `<service>.service` | systemd unit running `current/start` with `PORT` set, `Restart=on-failure`, hardened with `ProtectSystem=strict`; enabled, and starts on the first deploy |
+| `<service>.service` | systemd unit running `current/start` with one variable per port, `Restart=on-failure`, hardened with `ProtectSystem=strict`; enabled, and starts on the first deploy |
 | sudoers entry | `systemctl restart <service>` for the runner |
-| public route (optional) | a file in `/etc/apache2/kolumbs.net.d/`, proxying a path on the TLS vhost to the service as a websocket |
+| public routes (optional) | one file per slot in `/etc/apache2/kolumbs.net.d/`, proxying a path on the TLS vhost to each routed port, as a websocket (`ws`) or plain HTTP (`http`) |
 
 The TLS vhost itself — certificates and the routes that predate this — is still managed by hand. The playbook adds one `IncludeOptional /etc/apache2/kolumbs.net.d/*.conf` line to it, and every route it owns is a file in that directory. Apache's configuration is tested before every reload.
 
-On first provisioning, the playbook checks that the slot's port is free, for the slot's protocol (TCP or UDP).
+Before it writes a unit, the playbook checks that each port the current unit does not already declare is free, for its protocol (TCP or UDP) — so a port added to an existing slot is checked too.
+
+### Ports
+
+Each entry under a slot's `ports` is one port:
+
+| Field | Meaning |
+|---|---|
+| `env` | the environment variable the service already reads (`^[A-Z][A-Z0-9_]*$`, unique in the slot); infra never renames it |
+| `port` | the number, from the vault |
+| `protocol` | `tcp` or `udp` — one port per purpose, so a number is never shared by both |
+| `exposure` | `internal` (LAN only, never forwarded) or `external` (public) |
+| `route` | optional, external TCP ports only: a public path on the TLS vhost |
+| `route_scheme` | `ws` (default) or `http` |
+
+A TCP service listens on localhost only; a UDP service may listen on the LAN, since its port is never forwarded.
+
+Before anything changes, the playbook checks every slot: each vault value it uses is defined (the message names the missing `vault_…` key), names and `env`s are valid, no two entries share a port or a route, a route sits only on an external TCP port, and each port lies in the range for its exposure (`vault_internal_port_range`, `vault_external_port_range`, each `[first, last]`). Messages name the slot and the variable, never the number.
 
 ### Current slots
 
-| Service | Vault entries |
-|---|---|
-| botforge | `vault_botforge_port`, `vault_botforge_route` |
-| telemetry | `vault_telemetry_port` (UDP, LAN only, no route) |
+| Service | Ports (`env` · protocol · exposure) | Vault entries |
+|---|---|---|
+| botforge | `PORT` · tcp · external, routed (`ws`) | `vault_botforge_port`, `vault_botforge_route` |
+| telemetry | `PORT` · udp · internal | `vault_telemetry_port` |
 
-A slot's port and public route are internal details of the machine, so like the SSH port they live only in the vault. Infra holds nothing else about a service: its configuration and secrets belong to its own repository.
+A slot's ports and routes, like the port ranges and the SSH port, are internal details of the machine, so they live only in the vault. Infra holds nothing else about a service: its configuration and secrets belong to its own repository.
 
 ### Adding a slot
 
-1. Add its port and route to the vault (`ansible-vault edit group_vars/all/vault.yml`), and a bridge for each to `group_vars/all/vars.yml`.
-2. Include `tasks/service_slot.yml` for it in the service-slot play in `main.yml`, with `slot_name`, `slot_port`, an optional `slot_route`, and `slot_protocol: udp` for a UDP service (the default is `tcp`). A TCP service listens on localhost only; a UDP service may listen on the LAN, since its port is never forwarded.
+1. Add its ports and routes to the vault (`ansible-vault edit group_vars/all/vault.yml`), each port from the range for its exposure.
+2. Add one entry to `service_slots` in `group_vars/all/vars.yml`, with the service's `name` and its `ports`. No task code is needed.
 3. Run the playbook; then the service's pipeline can deploy it.
+
+A port is added to an existing slot the same way: one more entry under its `ports`.
 
 ---
 

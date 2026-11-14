@@ -6,30 +6,21 @@
 #   - the runner account owns /opt/<slot_name>; the pipeline puts a release
 #     there and points /opt/<slot_name>/current at it
 #   - the service runs /opt/<slot_name>/current/start as the <slot_name>
-#     account, with PORT in its environment
+#     account, with each of its ports in the environment variable the slot
+#     names for it
 #   - anything else the service needs - configuration, secrets - is its
 #     pipeline's business: it writes them under /opt/<slot_name>, where the
 #     setgid directory makes them readable to the service and nobody else
 #   - anything it keeps goes in $STATE_DIRECTORY (/var/lib/<slot_name>)
 #   - the runner may run exactly `systemctl restart <slot_name>`, nothing else
 #
-# Infra knows only what is infra's: the port it allocates and the route to it.
+# Infra knows only what is infra's: the ports it allocates and the routes to them.
 #
-# Parameters:
-#   slot_name      service and account name
-#   slot_port      port the service listens on: localhost only for TCP; a UDP
-#                  service may listen on the LAN, since the router never
-#                  forwards it
-#   slot_protocol  optional, tcp (default) or udp
-#   slot_route     optional public path on the TLS vhost, proxied as a websocket
-
-- name: "{{ slot_name }}: check the slot's parameters"
-  ansible.builtin.assert:
-    that:
-      - slot_name is match('^[a-z][a-z0-9-]*$')
-      - slot_port | int > 1024
-      - slot_protocol | default('tcp') in ['tcp', 'udp']
-    fail_msg: "{{ slot_name }}: needs a lowercase name, a port above 1024 and protocol tcp or udp."
+# Parameters (one service_slots entry, checked by tasks/service_slots_check.yml):
+#   slot_name   service and account name
+#   slot_ports  list of { env, port, protocol, exposure, route?, route_scheme? }:
+#               a TCP service listens on localhost only; a UDP service may
+#               listen on the LAN, since the router never forwards it
 
 - name: "{{ slot_name }}: service account"
   ansible.builtin.user:
@@ -51,25 +42,37 @@
     group: "{{ slot_name }}"
     mode: "2750"
 
-- name: "{{ slot_name }}: check whether the slot exists yet"
-  ansible.builtin.stat:
+- name: "{{ slot_name }}: read its current unit"
+  ansible.builtin.slurp:
     path: "/etc/systemd/system/{{ slot_name }}.service"
-  register: slot_unit_file
+  register: slot_current_unit
+  failed_when: false
 
-# Only on first provisioning - afterwards the service itself holds the port.
-- name: "{{ slot_name }}: read listeners on its port"
-  ansible.builtin.command: ss -l{{ 'u' if slot_protocol | default('tcp') == 'udp' else 't' }}nH "sport = :{{ slot_port }}"
+# A port the current unit already declares is held by the service itself.
+- name: "{{ slot_name }}: read listeners on its new ports"
+  ansible.builtin.command: ss -l{{ 'u' if item.protocol == 'udp' else 't' }}nH "sport = :{{ item.port }}"
   register: slot_port_listeners
   changed_when: false
   check_mode: false
-  when: not slot_unit_file.stat.exists
+  loop: "{{ slot_ports }}"
+  loop_control:
+    label: "{{ item.env }}"
+  when: item.port | string not in slot_declared_ports
+  vars:
+    slot_declared_ports: >-
+      {{ (slot_current_unit.content | default('') | b64decode).splitlines()
+         | select('match', '^Environment=[A-Z][A-Z0-9_]*=[0-9]+$')
+         | map('regex_replace', '^[^=]*=[^=]*=', '') | list }}
 
-- name: "{{ slot_name }}: ensure its port is free"
+- name: "{{ slot_name }}: ensure its new ports are free"
   ansible.builtin.assert:
     that:
-      - slot_port_listeners.stdout | trim | length == 0
-    fail_msg: "{{ slot_name }}: its port is already in use."
-  when: not slot_unit_file.stat.exists
+      - item.skipped | default(false) or item.stdout | trim | length == 0
+    fail_msg: "{{ slot_name }}: the port for {{ item.item.env }} is already in use."
+    quiet: true
+  loop: "{{ slot_port_listeners.results }}"
+  loop_control:
+    label: "{{ item.item.env }}"
 
 - name: "{{ slot_name }}: systemd unit"
   ansible.builtin.template:
@@ -101,12 +104,19 @@
     mode: "0440"
     validate: visudo -cf %s
 
-- name: "{{ slot_name }}: public route"
+- name: "{{ slot_name }}: public routes"
   ansible.builtin.template:
     src: service.route.conf.j2
     dest: "{{ apache_routes_dir }}/{{ slot_name }}.conf"
     owner: root
     group: root
     mode: "0644"
-  when: slot_route is defined
+  when: slot_routes | length > 0
+  notify: Reload Apache
+
+- name: "{{ slot_name }}: no public routes"
+  ansible.builtin.file:
+    path: "{{ apache_routes_dir }}/{{ slot_name }}.conf"
+    state: absent
+  when: slot_routes | length == 0
   notify: Reload Apache
